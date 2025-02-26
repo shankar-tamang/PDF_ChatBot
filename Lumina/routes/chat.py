@@ -31,10 +31,11 @@ def chat_message():
     data = request.get_json()
     session_id = data.get("session_id")
     user_message = data.get("user_message")
+
     if not session_id or not user_message:
         return jsonify({"error": "Missing session_id or user_message"}), 400
 
-    # Retrieve (or create) conversation
+    # Retrieve or create conversation
     conversation = get_or_create_conversation(session_id)
 
     # Store user's message
@@ -42,34 +43,33 @@ def chat_message():
     db.session.add(user_msg)
     db.session.commit()
 
-    # Retrieve context from PDFs associated with this conversation.
-    # For each PDF, use its stored collection name to get its dedicated Chroma collection.
-    context_parts = []
-    
+    # Retrieve relevant chunks from each associated PDF
+    context_sources = []
     translated_query = translate_text(user_message, target_lang="ne")
+
     for pdf in conversation.pdfs:
-        # pdf.pdf_id contains the dedicated collection name.
         client = get_chroma_client()
         collection = get_chroma_collection(client, pdf.pdf_id)
         chunks = retrieve_relevant_chunks(translated_query, collection)
+
         if chunks:
-            context_parts.append("\n".join(chunks))
-    context = "\n".join(context_parts) if context_parts else ""
+            formatted_chunks = "\n".join([chunk["text"] if isinstance(chunk, dict) and "text" in chunk else str(chunk) for chunk in chunks])
 
-    # Translate the user's message to Nepali for improved LLM processing.
+            context_sources.append(f"📄 **Source: {pdf.filename}**\n{formatted_chunks}")
 
-    # Construct prompt: include context if available.
+    context = "\n\n".join(context_sources) if context_sources else ""
+
+    # Construct the LLM prompt
     if context:
-        prompt = f"Given the following context:\n{context}\n\nAnswer the following query:\n{user_message}"
+        prompt = f"Based on the following documents:\n\n{context}\n\nProvide a response to:\n{user_message}"
     else:
         prompt = f"Answer: {translated_query}"
 
-    # Generate answer via Gemini LLM.
+    # Generate response with LLM
     raw_answer = generate_answer_with_llm(prompt)
     answer_html = markdown2.markdown(raw_answer)
 
-
-    # Store bot's response.
+    # Store bot's response
     bot_msg = Message(conversation_id=conversation.id, sender="bot", content=answer_html)
     db.session.add(bot_msg)
     db.session.commit()

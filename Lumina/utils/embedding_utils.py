@@ -36,17 +36,22 @@ def store_chunks_in_chroma(chunks, filename, chroma_collection):
     print(f"Stored {len(chunks)} chunks for {filename}.")
 
 def retrieve_relevant_chunks(query, chroma_collection, top_k=5):
-    """Retrieves the most relevant text chunks from ChromaDB."""
+    """Retrieves the most relevant text chunks from ChromaDB along with their source filenames."""
     model = SentenceTransformer(SENTENCE_TRANSFORMER_MODEL)
     query_embedding = model.encode(query, convert_to_tensor=False).tolist()
-    
+
     results = chroma_collection.query(
         query_embeddings=[query_embedding],
         n_results=top_k,
         include=["documents", "metadatas"]
     )
-    
-    # Return the list of documents (chunks)
-    documents = results.get('documents', [[]])
-    return documents[0] if documents and documents[0] else []
 
+    documents = results.get('documents', [[]])
+    metadata = results.get('metadatas', [[]])
+
+    # Ensure we return both the document text and metadata
+    retrieved_chunks = []
+    for doc, meta in zip(documents[0], metadata[0]):
+        retrieved_chunks.append({"text": doc, "filename": meta.get("filename", "Unknown")})
+
+    return retrieved_chunks
